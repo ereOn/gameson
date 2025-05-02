@@ -1,0 +1,13 @@
+[package]
+name = "gameson"
+version = "0.1.0"
+edition = "2024"
+description = "HTMX server-side rendering framework for Rust, based on Axum."
+authors = ["Julien Kauffmann"]
+repository = "https://github.com/ereOn/gameson"
+license-file = "LICENSE-MIT"
+keywords = ["game-dev", "json", "serialization"]
+categories = ["encoding"]
+
+
+[dependencies]

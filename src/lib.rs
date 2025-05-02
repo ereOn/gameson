@@ -1,0 +1,1 @@
+//! GameSON encoding format.

@@ -1,2 +1,3 @@
-# gson
-A game-oriented serialization format
+# gameson
+
+A game-oriented serialization format and types.
