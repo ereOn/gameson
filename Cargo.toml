@@ -5,7 +5,7 @@ edition = "2024"
 description = "HTMX server-side rendering framework for Rust, based on Axum."
 authors = ["Julien Kauffmann"]
 repository = "https://github.com/ereOn/gameson"
-license-file = "LICENSE-MIT"
+license-file = "LICENSE"
 keywords = ["game-dev", "json", "serialization"]
 categories = ["encoding"]
 
