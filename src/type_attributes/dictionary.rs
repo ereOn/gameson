@@ -54,7 +54,7 @@ impl<Id: Ord + Clone + Display> DictionaryTypeAttributes<Id> {
     /// The specified `refs_by_id` is used to resolve the type identifier of the items and must
     /// contain its id or the call will panic.
     pub(crate) fn instantiate<FieldName: Ord + Clone + Display>(
-        self,
+        &self,
         mut refs_by_id: BTreeMap<Id, Arc<TypeDefinitionInstance<Id, FieldName>>>,
     ) -> InstantiationResult<
         DictionaryTypeAttributes<Arc<TypeDefinitionInstance<Id, FieldName>>>,

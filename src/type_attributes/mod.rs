@@ -105,7 +105,7 @@ impl<Id, FieldName: Ord + Display + Clone> TypeAttributes<Id, FieldName> {
 pub type InstantiationResult<T, Id, FieldName> = Result<T, InstantiationError<Id, FieldName>>;
 
 /// An error that can occur when instantiating type attributes.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum InstantiationError<Id, FieldName> {
     /// The dictionary key type is not appropriate.
     #[error(
@@ -130,13 +130,19 @@ impl<Id: Ord + Clone + Display, FieldName: Ord + Clone + Display> TypeAttributes
     pub(crate) fn instantiate(
         self,
         refs_by_id: BTreeMap<Id, Arc<TypeDefinitionInstance<Id, FieldName>>>,
-    ) -> Result<TypeAttributesInstance<Id, FieldName>, InstantiationError<Id, FieldName>> {
+    ) -> Result<TypeAttributesInstance<Id, FieldName>, (Self, InstantiationError<Id, FieldName>)>
+    {
         Ok(match self {
             TypeAttributes::Array(a) => TypeAttributesInstance::Array(a.instantiate(refs_by_id)),
             TypeAttributes::Dictionary(d) => {
-                TypeAttributesInstance::Dictionary(d.instantiate(refs_by_id)?)
+                TypeAttributesInstance::Dictionary(match d.instantiate(refs_by_id) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        return Err((Self::Dictionary(d), e));
+                    }
+                })
             }
-            TypeAttributes::Boolean(b) => TypeAttributesInstance::Boolean(b),
+            TypeAttributes::Boolean(b) => TypeAttributesInstance::Boolean(b.clone()),
             TypeAttributes::Int32(i) => TypeAttributesInstance::Int32(i),
             TypeAttributes::Int64(i) => TypeAttributesInstance::Int64(i),
             TypeAttributes::Uint32(i) => TypeAttributesInstance::Uint32(i),

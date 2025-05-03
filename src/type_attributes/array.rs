@@ -38,7 +38,7 @@ impl<Id: Ord> ArrayTypeAttributes<Id> {
     /// The specified `refs_by_id` is used to resolve the type identifier of the items and must
     /// contain its id or the call will panic.
     pub(crate) fn instantiate<FieldName: Ord>(
-        self,
+        &self,
         mut refs_by_id: BTreeMap<Id, Arc<TypeDefinitionInstance<Id, FieldName>>>,
     ) -> ArrayTypeAttributes<Arc<TypeDefinitionInstance<Id, FieldName>>> {
         ArrayTypeAttributes {

@@ -20,59 +20,34 @@ pub struct TypeDefinitionRegistry<Id, FieldName: Ord + Display + Clone> {
 }
 
 /// An error that can occur when registering type definitions.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum RegistrationError<Id, FieldName> {
     /// A type definition with the same identifier already exists.
-    #[error(
-        "Unable to register type definition `{new_name}` with id `{id}` as another type definition `{existing_name}` with the same id already exists"
-    )]
-    DuplicateTypeDefinition {
-        id: Id,
-        new_name: FieldName,
-        existing_name: FieldName,
-    },
+    #[error("another type definition `{existing_name}` with the same id already exists")]
+    DuplicateTypeDefinition { existing_name: FieldName },
 
     /// A type definition with the same name already exists.
-    #[error(
-        "Unable to register type definition `{new_name}` with id `{id}` as another type definition with id `{existing_id}` has the same name"
-    )]
-    DuplicateTypeDefinitionName {
-        id: Id,
-        new_name: FieldName,
-        existing_id: Id,
-    },
+    #[error("another type definition with id `{existing_id}` has the same name")]
+    DuplicateTypeDefinitionName { existing_id: Id },
 
     /// A type definition has a broken reference.
-    #[error(
-        "Unable to register type definition `{new_name}` with id `{id}` as it has a broken reference to type definition `{referenced_id}`"
-    )]
-    BrokenReference {
-        id: Id,
-        new_name: FieldName,
-        referenced_id: Id,
-    },
+    #[error("type definition has a broken reference to type definition `{referenced_id}`")]
+    BrokenReference { referenced_id: Id },
 
     /// A type definition has a circular reference.
     #[error(
-        "Unable to register type definition `{new_name}` with id `{id}` as it would cause a circular reference cycle: {}",
+        "registering type definition would cause a circular reference cycle: {}",
         cycle.iter().map(|(id, name)| format!("`{name}` (`{id}`)")).join(" -> ")
     )]
-    CircularReference {
-        id: Id,
-        new_name: FieldName,
-        cycle: Vec<(Id, FieldName)>,
-    },
+    CircularReference { cycle: Vec<(Id, FieldName)> },
+
+    /// A type definition has a blocked reference.
+    #[error("type definition has a reference to a type definition that cannot be registered")]
+    BlockedReference,
 
     /// An error occurred while instantiating the type attributes.
-    #[error(
-        "unable to instantiate type attributes for type definition `{name}` with id `{id}`: {err}"
-    )]
-    InstantiationError {
-        id: Id,
-        name: FieldName,
-        #[source]
-        err: InstantiationError<Id, FieldName>,
-    },
+    #[error("unable to instantiate type attributes for type definition: {0}")]
+    InstantiationError(#[from] InstantiationError<Id, FieldName>),
 }
 
 impl<Id: Ord + Clone + Display, FieldName: Ord + Clone + Display>
@@ -83,13 +58,27 @@ impl<Id: Ord + Clone + Display, FieldName: Ord + Clone + Display>
     /// The passed-in type definitions can only have references to other, previously registered,
     /// type definitions or to other types definitions in the same batch.
     ///
-    /// If the batch contains broken or circular references, the function will return an error.
+    /// If the batch contains broken or circular references, those type definitions will not be
+    /// registered.
     ///
-    /// If the batch contains duplicate type definitions, the function will return an error.
+    /// If the batch contains duplicate type definitions, those will not be registered.
+    ///
+    /// The method returns list of all the type definitions that were registered as well as those
+    /// who were not registered alongside the reason why they were not registered.
+    #[expect(
+        clippy::type_complexity,
+        reason = "inherent associated types are not yet stable so we can't do much about it here"
+    )]
     pub fn register(
         &mut self,
         type_definitions: impl IntoIterator<Item = TypeDefinition<Id, FieldName>>,
-    ) -> Result<(), RegistrationError<Id, FieldName>> {
+    ) -> (
+        Vec<Arc<TypeDefinitionInstance<Id, FieldName>>>,
+        Vec<(
+            TypeDefinition<Id, FieldName>,
+            RegistrationError<Id, FieldName>,
+        )>,
+    ) {
         // This gives us a list of all the type definitions to register, with the references they
         // have.
         let mut type_definitions: Vec<_> = type_definitions
@@ -109,6 +98,8 @@ impl<Id: Ord + Clone + Display, FieldName: Ord + Clone + Display>
         // Contains the list of type definitions that have not been registered yet.
         let mut postponed_type_definitions = Vec::with_capacity(type_definitions.len());
         let mut last_count = type_definitions.len();
+        let mut failed_type_definitions = Vec::new();
+        let mut registered_type_definitions = Vec::new();
 
         // While we have type definitions to register, we continue.
         while !type_definitions.is_empty() {
@@ -117,22 +108,28 @@ impl<Id: Ord + Clone + Display, FieldName: Ord + Clone + Display>
             // references and the lesser likelihood of broken or circular references.
             type_definitions.sort_by_key(|(refs, _)| refs.len());
 
-            'outer: for (refs, td) in type_definitions {
+            'outer: for (refs, mut td) in type_definitions {
                 // Check for duplicate type definitions.
                 if let Some(existing) = self.by_id.get(&td.id) {
-                    return Err(RegistrationError::DuplicateTypeDefinition {
-                        id: td.id.clone(),
-                        new_name: td.name.clone(),
-                        existing_name: existing.name.clone(),
-                    });
+                    failed_type_definitions.push((
+                        td,
+                        RegistrationError::DuplicateTypeDefinition {
+                            existing_name: existing.name.clone(),
+                        },
+                    ));
+
+                    continue 'outer;
                 }
 
                 if let Some(existing) = self.by_name.get(&td.name) {
-                    return Err(RegistrationError::DuplicateTypeDefinitionName {
-                        id: td.id.clone(),
-                        new_name: td.name.clone(),
-                        existing_id: existing.id.clone(),
-                    });
+                    failed_type_definitions.push((
+                        td,
+                        RegistrationError::DuplicateTypeDefinitionName {
+                            existing_id: existing.id.clone(),
+                        },
+                    ));
+
+                    continue 'outer;
                 }
 
                 let mut refs_by_id = BTreeMap::new();
@@ -160,12 +157,13 @@ impl<Id: Ord + Clone + Display, FieldName: Ord + Clone + Display>
 
                 let attributes = match td.attributes.instantiate(refs_by_id) {
                     Ok(attributes) => attributes,
-                    Err(err) => {
-                        return Err(RegistrationError::InstantiationError {
-                            id: td.id,
-                            name: td.name,
-                            err,
-                        });
+                    Err((attributes, err)) => {
+                        td.attributes = attributes;
+
+                        failed_type_definitions
+                            .push((td, RegistrationError::InstantiationError(err)));
+
+                        continue 'outer;
                     }
                 };
 
@@ -178,7 +176,8 @@ impl<Id: Ord + Clone + Display, FieldName: Ord + Clone + Display>
                 };
 
                 // Register the type definition.
-                self.insert_type_definition_instance(type_definition_instance);
+                registered_type_definitions
+                    .push(self.insert_type_definition_instance(type_definition_instance));
             }
 
             type_definitions = std::mem::take(&mut postponed_type_definitions);
@@ -193,63 +192,93 @@ impl<Id: Ord + Clone + Display, FieldName: Ord + Clone + Display>
                     .collect();
 
                 // Check for broken references.
-                for (refs, td) in &type_definitions {
-                    for ref_ in refs {
+                'outer: for (refs, td) in type_definitions {
+                    for ref_ in &refs {
                         if !(remaining_ids.contains(ref_) || self.by_id.contains_key(ref_)) {
-                            return Err(RegistrationError::BrokenReference {
-                                id: td.id.clone(),
-                                new_name: td.name.clone(),
-                                referenced_id: ref_.clone(),
-                            });
+                            failed_type_definitions.push((
+                                td,
+                                RegistrationError::BrokenReference {
+                                    referenced_id: ref_.clone(),
+                                },
+                            ));
+
+                            continue 'outer;
                         }
+                    }
+
+                    postponed_type_definitions.push((refs, td));
+                }
+
+                type_definitions = std::mem::take(&mut postponed_type_definitions);
+
+                // The remaining type definitions are the ones that lead to circular references.
+                loop {
+                    let deps = type_definitions
+                        .iter()
+                        .map(|(refs, td)| (td.id.clone(), refs.iter().cloned().collect()))
+                        .collect::<BTreeMap<_, _>>();
+
+                    let cycle = detect_minimal_cycle(&deps);
+
+                    if cycle.is_empty() {
+                        // No cycle found: we can break.
+                        break;
+                    }
+
+                    let mut cyclic_type_definitions = Vec::with_capacity(cycle.len() - 1);
+
+                    for (refs_, td) in std::mem::take(&mut type_definitions) {
+                        if cycle.contains(&td.id) {
+                            cyclic_type_definitions.push(td);
+                        } else {
+                            postponed_type_definitions.push((refs_, td));
+                        }
+                    }
+
+                    let cycle = cycle
+                        .into_iter()
+                        .map(|id| {
+                            // It's impossible for the cycle to contain an id that is not in the new
+                            // type definitions, as the already registered type definitions are
+                            // guaranteed to not contain any external references by this very function.
+
+                            let td = cyclic_type_definitions
+                                .iter()
+                                .find(|td| td.id == id)
+                                .expect("we should have a type definition for this id");
+                            (td.id.clone(), td.name.clone())
+                        })
+                        .collect::<Vec<_>>();
+
+                    for td in cyclic_type_definitions {
+                        failed_type_definitions.push((
+                            td,
+                            RegistrationError::CircularReference {
+                                cycle: cycle.clone(),
+                            },
+                        ));
                     }
                 }
 
-                // If we have no broken references, we have a circular reference.
+                // All the remaining type definitions are the ones that lead to circular
+                // references but weren't part of the cycle.
+                for (_, td) in postponed_type_definitions {
+                    failed_type_definitions.push((td, RegistrationError::BlockedReference));
+                }
 
-                let deps = type_definitions
-                    .iter()
-                    .map(|(refs, td)| (td.id.clone(), refs.iter().cloned().collect()))
-                    .collect::<BTreeMap<_, _>>();
-
-                let cycle = detect_minimal_cycle(&deps)
-                    .into_iter()
-                    .map(|id| {
-                        // It's impossible for the cycle to contain an id that is not in the new
-                        // type definitions, as the already registered type definitions are
-                        // guaranteed to not contain any external references by this very function.
-
-                        let td = type_definitions
-                            .iter()
-                            .map(|(_, td)| td)
-                            .find(|td| td.id == id)
-                            .expect("we should have a type definition for this id");
-                        (td.id.clone(), td.name.clone())
-                    })
-                    .collect::<Vec<_>>();
-
-                let (id, new_name) = cycle
-                    .first()
-                    .expect("we should have a non-empty cycle")
-                    .clone();
-
-                return Err(RegistrationError::CircularReference {
-                    id,
-                    new_name,
-                    cycle,
-                });
+                break;
+            } else {
+                last_count = type_definitions.len();
             }
-
-            last_count = type_definitions.len();
         }
 
-        Ok(())
+        (registered_type_definitions, failed_type_definitions)
     }
 
     fn insert_type_definition_instance(
         &mut self,
         type_definition_instance: TypeDefinitionInstance<Id, FieldName>,
-    ) {
+    ) -> Arc<TypeDefinitionInstance<Id, FieldName>> {
         let type_definition_instance = Arc::new(type_definition_instance);
 
         self.by_id.insert(
@@ -258,8 +287,10 @@ impl<Id: Ord + Clone + Display, FieldName: Ord + Clone + Display>
         );
         self.by_name.insert(
             type_definition_instance.name.clone(),
-            type_definition_instance,
+            type_definition_instance.clone(),
         );
+
+        type_definition_instance
     }
 }
 
@@ -402,21 +433,29 @@ mod tests {
         };
 
         // Register the type definitions.
-        registry
-            .register([
-                my_int,
-                my_string,
-                my_int_array,
-                my_string_array,
-                my_int_dictionary,
-                my_enum,
-            ])
-            .expect("Failed to register type definitions");
+        let (registered, errors) = registry.register([
+            my_int,
+            my_string,
+            my_int_array,
+            my_string_array,
+            my_int_dictionary,
+            my_enum,
+        ]);
+
+        assert_eq!(
+            registered.iter().map(|td| td.id).collect::<Vec<_>>(),
+            vec![1, 2, 6, 3, 4, 5],
+        );
+        assert!(errors.is_empty());
 
         // Register the enum array type definition.
-        registry
-            .register([my_enum_array])
-            .expect("Failed to register type definitions");
+        let (registered, errors) = registry.register([my_enum_array]);
+
+        assert_eq!(
+            registered.iter().map(|td| td.id).collect::<Vec<_>>(),
+            vec![7]
+        );
+        assert!(errors.is_empty());
     }
 
     #[test]
@@ -439,21 +478,23 @@ mod tests {
         };
 
         // Register the type definitions.
-        match registry
-            .register([my_int, my_string_array])
-            .expect_err("should have failed")
-        {
-            RegistrationError::BrokenReference {
-                id,
-                new_name,
-                referenced_id,
-            } => {
-                assert_eq!(id, 4);
-                assert_eq!(new_name, "MyStringArray");
-                assert_eq!(referenced_id, 2);
-            }
-            _ => panic!("should have been a broken reference error"),
-        }
+        let (registered, failed) = registry.register([my_int, my_string_array]);
+
+        assert_eq!(
+            registered.into_iter().map(|td| td.id).collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert_eq!(
+            failed
+                .into_iter()
+                .map(|(td, err)| (td.id, td.name, err))
+                .collect::<Vec<_>>(),
+            vec![(
+                4,
+                "MyStringArray",
+                RegistrationError::BrokenReference { referenced_id: 2 }
+            )]
+        );
     }
 
     #[test]
@@ -476,21 +517,25 @@ mod tests {
         };
 
         // Register the type definitions.
-        match registry
-            .register([my_int, my_string_array])
-            .expect_err("should have failed")
-        {
-            RegistrationError::DuplicateTypeDefinition {
-                id,
-                new_name,
-                existing_name,
-            } => {
-                assert_eq!(id, 1);
-                assert_eq!(new_name, "MyStringArray");
-                assert_eq!(existing_name, "MyInt");
-            }
-            _ => panic!("should have been a duplicate type definition error"),
-        }
+        let (registered, failed) = registry.register([my_int, my_string_array]);
+
+        assert_eq!(
+            registered.into_iter().map(|td| td.id).collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert_eq!(
+            failed
+                .into_iter()
+                .map(|(td, err)| (td.id, td.name, err))
+                .collect::<Vec<_>>(),
+            vec![(
+                1,
+                "MyStringArray",
+                RegistrationError::DuplicateTypeDefinition {
+                    existing_name: "MyInt"
+                }
+            )]
+        );
     }
 
     #[test]
@@ -513,21 +558,23 @@ mod tests {
         };
 
         // Register the type definitions.
-        match registry
-            .register([my_int, my_string_array])
-            .expect_err("should have failed")
-        {
-            RegistrationError::DuplicateTypeDefinitionName {
-                id,
-                new_name,
-                existing_id,
-            } => {
-                assert_eq!(id, 2);
-                assert_eq!(new_name, "MyInt");
-                assert_eq!(existing_id, 1);
-            }
-            _ => panic!("should have been a duplicate type definition name error"),
-        }
+        let (registered, failed) = registry.register([my_int, my_string_array]);
+
+        assert_eq!(
+            registered.into_iter().map(|td| td.id).collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert_eq!(
+            failed
+                .into_iter()
+                .map(|(td, err)| (td.id, td.name, err))
+                .collect::<Vec<_>>(),
+            vec![(
+                2,
+                "MyInt",
+                RegistrationError::DuplicateTypeDefinitionName { existing_id: 1 }
+            )]
+        );
     }
 
     #[test]
@@ -566,29 +613,58 @@ mod tests {
         };
 
         // Register the type definitions.
-        match registry
-            .register([my_int, my_array_a, my_array_b, my_array_c, my_array_d])
-            .expect_err("should have failed")
-        {
-            RegistrationError::CircularReference {
-                id,
-                new_name,
-                cycle,
-            } => {
-                assert_eq!(id, 3);
-                assert_eq!(new_name, "MyArrayB");
-                assert_eq!(
-                    cycle,
-                    vec![
-                        (3, "MyArrayB"),
-                        (4, "MyArrayC"),
-                        (5, "MyArrayD"),
-                        (3, "MyArrayB")
-                    ]
-                );
-            }
-            _ => panic!("should have been a circular reference error"),
-        }
+        let (registered, failed) =
+            registry.register([my_int, my_array_a, my_array_b, my_array_c, my_array_d]);
+
+        assert_eq!(
+            registered.into_iter().map(|td| td.id).collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert_eq!(
+            failed
+                .into_iter()
+                .map(|(td, err)| (td.id, td.name, err))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    3,
+                    "MyArrayB",
+                    RegistrationError::CircularReference {
+                        cycle: vec![
+                            (3, "MyArrayB"),
+                            (4, "MyArrayC"),
+                            (5, "MyArrayD"),
+                            (3, "MyArrayB")
+                        ]
+                    }
+                ),
+                (
+                    4,
+                    "MyArrayC",
+                    RegistrationError::CircularReference {
+                        cycle: vec![
+                            (3, "MyArrayB"),
+                            (4, "MyArrayC"),
+                            (5, "MyArrayD"),
+                            (3, "MyArrayB")
+                        ]
+                    }
+                ),
+                (
+                    5,
+                    "MyArrayD",
+                    RegistrationError::CircularReference {
+                        cycle: vec![
+                            (3, "MyArrayB"),
+                            (4, "MyArrayC"),
+                            (5, "MyArrayD"),
+                            (3, "MyArrayB")
+                        ]
+                    }
+                ),
+                (2, "MyArrayA", RegistrationError::BlockedReference),
+            ]
+        );
     }
 
     #[test]
