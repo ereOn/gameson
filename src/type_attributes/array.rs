@@ -1,4 +1,8 @@
+use std::{collections::BTreeMap, fmt::Display, sync::Arc};
+
 use serde::{Deserialize, Serialize};
+
+use crate::TypeDefinitionInstance;
 
 /// Attributes for an array type.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -12,6 +16,36 @@ impl<Id> ArrayTypeAttributes<Id> {
     /// Create new array type attributes.
     pub fn new(items_type_id: Id) -> Self {
         Self { items_type_id }
+    }
+
+    /// Get the items type identifier.
+    pub fn items_type_id(&self) -> &Id {
+        &self.items_type_id
+    }
+}
+
+impl<Id: Display> Display for ArrayTypeAttributes<Id> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { items_type_id } = self;
+
+        items_type_id.fmt(f)
+    }
+}
+
+impl<Id: Ord> ArrayTypeAttributes<Id> {
+    /// Instantiate the array type attributes.
+    ///
+    /// The specified `refs_by_id` is used to resolve the type identifier of the items and must
+    /// contain its id or the call will panic.
+    pub(crate) fn instantiate<FieldName: Ord>(
+        self,
+        mut refs_by_id: BTreeMap<Id, Arc<TypeDefinitionInstance<Id, FieldName>>>,
+    ) -> ArrayTypeAttributes<Arc<TypeDefinitionInstance<Id, FieldName>>> {
+        ArrayTypeAttributes {
+            items_type_id: refs_by_id
+                .remove(&self.items_type_id)
+                .expect("items_type_id not found"),
+        }
     }
 }
 

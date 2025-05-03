@@ -21,9 +21,9 @@ use serde::{Deserialize, Serialize};
 /// Aliases can never overlap with other enum names.
 ///
 /// Empty enum types are allowed, although no value will satisfy their parsing requirements.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub struct EnumTypeAttributes<EnumName> {
+pub struct EnumTypeAttributes<EnumName: Ord> {
     /// The values of the enum.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     values: BTreeMap<EnumName, EnumTypeValue>,
@@ -31,23 +31,25 @@ pub struct EnumTypeAttributes<EnumName> {
     /// The aliases of the enum.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     aliases: BTreeMap<EnumName, EnumName>,
-
-    /// A default value for the enum.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    default: Option<EnumName>,
 }
 
-impl<EnumName> Default for EnumTypeAttributes<EnumName> {
-    fn default() -> Self {
-        Self {
-            values: Default::default(),
-            aliases: Default::default(),
-            default: Default::default(),
+impl<EnumName: Ord + Display> Display for EnumTypeAttributes<EnumName> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { values, .. } = self;
+
+        for (name, value) in values {
+            if value.deprecated {
+                write!(f, "{name}*")?;
+            } else {
+                write!(f, "{name}")?;
+            }
         }
+
+        Ok(())
     }
 }
 
-impl<EnumName> EnumTypeAttributes<EnumName> {
+impl<EnumName: Ord> EnumTypeAttributes<EnumName> {
     /// Return a builder for the enum type.
     pub fn builder() -> EnumTypeAttributesBuilder<EnumName> {
         EnumTypeAttributesBuilder::default()
@@ -64,10 +66,6 @@ pub enum NewEnumTypeAttributesError<EnumName> {
     /// An enum alias points to a non-existant value.
     #[error("enum alias `{0}` points to a non-existant value `{1}`")]
     EnumAliasPointsToNonExistantValue(EnumName, EnumName),
-
-    /// The default value is not a valid enum value.
-    #[error("default value `{0}` is not a valid enum value")]
-    DefaultValueIsNotAValidEnumValue(EnumName),
 }
 
 impl<EnumName: Ord + Display + Clone> EnumTypeAttributes<EnumName> {
@@ -78,11 +76,9 @@ impl<EnumName: Ord + Display + Clone> EnumTypeAttributes<EnumName> {
     /// This function will return an error if:
     /// - An enum value is also an alias.
     /// - An enum alias points to a non-existant value.
-    /// - The default value is not a valid enum value.
     fn new(
         values: BTreeMap<EnumName, EnumTypeValue>,
         aliases: BTreeMap<EnumName, EnumName>,
-        default: Option<EnumName>,
     ) -> Result<Self, NewEnumTypeAttributesError<EnumName>> {
         for (alias, value) in &aliases {
             if values.contains_key(alias) {
@@ -99,19 +95,7 @@ impl<EnumName: Ord + Display + Clone> EnumTypeAttributes<EnumName> {
             }
         }
 
-        if let Some(default) = &default {
-            if !values.contains_key(default) {
-                return Err(
-                    NewEnumTypeAttributesError::DefaultValueIsNotAValidEnumValue(default.clone()),
-                );
-            }
-        }
-
-        Ok(Self {
-            values,
-            aliases,
-            default,
-        })
+        Ok(Self { values, aliases })
     }
 }
 
@@ -129,13 +113,11 @@ impl<'de, EnumName: Ord + Display + Clone + Deserialize<'de>> Deserialize<'de>
             values: BTreeMap<T, EnumTypeValue>,
             #[serde(default = "BTreeMap::new")]
             aliases: BTreeMap<T, T>,
-            default: Option<T>,
         }
 
         let x = X::deserialize(deserializer)?;
 
-        Self::new(x.values, x.aliases, x.default)
-            .map_err(|err| serde::de::Error::custom(err.to_string()))
+        Self::new(x.values, x.aliases).map_err(|err| serde::de::Error::custom(err.to_string()))
     }
 }
 
@@ -159,9 +141,6 @@ pub struct EnumTypeAttributesBuilder<EnumName> {
 
     /// The aliases of the enum.
     aliases: BTreeMap<EnumName, EnumName>,
-
-    /// A default value for the enum.
-    default: Option<EnumName>,
 }
 
 impl<EnumName> Default for EnumTypeAttributesBuilder<EnumName> {
@@ -169,7 +148,6 @@ impl<EnumName> Default for EnumTypeAttributesBuilder<EnumName> {
         Self {
             values: Default::default(),
             aliases: Default::default(),
-            default: Default::default(),
         }
     }
 }
@@ -204,17 +182,11 @@ impl<EnumName: Ord + Display + Clone> EnumTypeAttributesBuilder<EnumName> {
         self
     }
 
-    /// Set the default value for the enum type.
-    pub fn with_default(mut self, name: EnumName) -> Self {
-        self.default = Some(name);
-        self
-    }
-
     /// Builds the enum type.
     pub fn build(
         self,
     ) -> Result<EnumTypeAttributes<EnumName>, NewEnumTypeAttributesError<EnumName>> {
-        EnumTypeAttributes::new(self.values, self.aliases, self.default)
+        EnumTypeAttributes::new(self.values, self.aliases)
     }
 }
 
@@ -228,13 +200,7 @@ mod tests {
 
     #[test]
     fn test_validation() {
-        EnumTypeAttributes::new(Default::default(), Default::default(), None).unwrap();
-
-        assert!(matches!(
-            EnumTypeAttributes::new(Default::default(), Default::default(), Some("foo"),)
-                .unwrap_err(),
-            NewEnumTypeAttributesError::DefaultValueIsNotAValidEnumValue("foo")
-        ));
+        EnumTypeAttributes::new(Default::default(), Default::default()).unwrap();
 
         EnumTypeAttributes::new(
             [(
@@ -247,7 +213,6 @@ mod tests {
             .into_iter()
             .collect(),
             [("bar", "foo")].into_iter().collect(),
-            None,
         )
         .unwrap();
 
@@ -263,7 +228,6 @@ mod tests {
                 .into_iter()
                 .collect(),
                 [("foo", "bar")].into_iter().collect(),
-                None,
             )
             .unwrap_err(),
             NewEnumTypeAttributesError::EnumValueIsAlias("foo")
@@ -281,7 +245,6 @@ mod tests {
                 .into_iter()
                 .collect(),
                 [("bar", "zoo")].into_iter().collect(),
-                None,
             )
             .unwrap_err(),
             NewEnumTypeAttributesError::EnumAliasPointsToNonExistantValue("bar", "zoo")
@@ -303,7 +266,6 @@ mod tests {
             .into_iter()
             .collect(),
             [("bar".to_owned(), "foo".to_owned())].into_iter().collect(),
-            Some("foo".to_owned()),
         )
         .unwrap();
 
@@ -317,7 +279,6 @@ mod tests {
                 "aliases": {
                     "bar": "foo",
                 },
-                "default": "foo",
             })
         );
 

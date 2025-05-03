@@ -5,18 +5,30 @@ use serde::{Deserialize, Serialize};
 /// Attributes for a number type.
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub struct NumberTypeAttributes<Int> {
+pub struct NumberTypeAttributes<Num> {
     /// The minimum value of the number.
     #[serde(skip_serializing_if = "Option::is_none")]
-    min: Option<Int>,
+    min: Option<Num>,
 
     /// The maximum value of the number.
     #[serde(skip_serializing_if = "Option::is_none")]
-    max: Option<Int>,
+    max: Option<Num>,
 }
 
-impl<'de, Int: Copy + Display + PartialOrd + Deserialize<'de>> Deserialize<'de>
-    for NumberTypeAttributes<Int>
+impl<Num: Display> Display for NumberTypeAttributes<Num> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { min, max } = self;
+        match (min, max) {
+            (Some(min), Some(max)) => write!(f, "{min}..{max}"),
+            (Some(min), None) => write!(f, "{min}.."),
+            (None, Some(max)) => write!(f, "..{max}"),
+            (None, None) => f.write_str(".."),
+        }
+    }
+}
+
+impl<'de, Num: Copy + Display + PartialOrd + Deserialize<'de>> Deserialize<'de>
+    for NumberTypeAttributes<Num>
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -40,15 +52,15 @@ impl<'de, Int: Copy + Display + PartialOrd + Deserialize<'de>> Deserialize<'de>
 
 /// An error that can occur when instantiating int type attributes.
 #[derive(Debug, thiserror::Error)]
-pub enum NewIntTypeAttributesError<Int> {
+pub enum NewNumberTypeAttributesError<Num> {
     /// The range is invalid.
     #[error("invalid range: {0} > {1}")]
-    InvalidRange(Int, Int),
+    InvalidRange(Num, Num),
 }
 
-impl<Int: PartialOrd + Copy> NumberTypeAttributes<Int> {
+impl<Num: PartialOrd + Copy> NumberTypeAttributes<Num> {
     /// Create a builder for the number type.
-    pub fn builder() -> NumberTypeAttributesBuilder<Int> {
+    pub fn builder() -> NumberTypeAttributesBuilder<Num> {
         NumberTypeAttributesBuilder::default()
     }
 
@@ -58,10 +70,10 @@ impl<Int: PartialOrd + Copy> NumberTypeAttributes<Int> {
     ///
     /// This function will return an error if:
     /// - The range is invalid.
-    fn new(min: Option<Int>, max: Option<Int>) -> Result<Self, NewIntTypeAttributesError<Int>> {
+    fn new(min: Option<Num>, max: Option<Num>) -> Result<Self, NewNumberTypeAttributesError<Num>> {
         if let (Some(min), Some(max)) = (min, max) {
             if min > max {
-                return Err(NewIntTypeAttributesError::InvalidRange(min, max));
+                return Err(NewNumberTypeAttributesError::InvalidRange(min, max));
             }
         }
 
@@ -71,12 +83,12 @@ impl<Int: PartialOrd + Copy> NumberTypeAttributes<Int> {
 
 /// A builder for number type attributes.
 #[derive(Debug)]
-pub struct NumberTypeAttributesBuilder<Int> {
-    min: Option<Int>,
-    max: Option<Int>,
+pub struct NumberTypeAttributesBuilder<Num> {
+    min: Option<Num>,
+    max: Option<Num>,
 }
 
-impl<Int> Default for NumberTypeAttributesBuilder<Int> {
+impl<Num> Default for NumberTypeAttributesBuilder<Num> {
     fn default() -> Self {
         Self {
             min: None,
@@ -85,21 +97,21 @@ impl<Int> Default for NumberTypeAttributesBuilder<Int> {
     }
 }
 
-impl<Int: PartialOrd + Copy> NumberTypeAttributesBuilder<Int> {
+impl<Num: PartialOrd + Copy> NumberTypeAttributesBuilder<Num> {
     /// Sets the minimum value of the number.
-    pub fn min(mut self, min: Int) -> Self {
+    pub fn min(mut self, min: Num) -> Self {
         self.min = Some(min);
         self
     }
 
     /// Sets the maximum value of the number.
-    pub fn max(mut self, max: Int) -> Self {
+    pub fn max(mut self, max: Num) -> Self {
         self.max = Some(max);
         self
     }
 
     /// Builds the number type.
-    pub fn build(self) -> Result<NumberTypeAttributes<Int>, NewIntTypeAttributesError<Int>> {
+    pub fn build(self) -> Result<NumberTypeAttributes<Num>, NewNumberTypeAttributesError<Num>> {
         NumberTypeAttributes::new(self.min, self.max)
     }
 }
