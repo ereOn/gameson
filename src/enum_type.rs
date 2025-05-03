@@ -137,13 +137,6 @@ impl<'de, EnumName: Ord + Display + Clone + Deserialize<'de>> Deserialize<'de>
     }
 }
 
-impl<EnumName> EnumType<EnumName> {
-    /// Returns whether the type has a default value.
-    pub fn has_default(&self) -> bool {
-        self.default.is_some()
-    }
-}
-
 /// An enumeration type value.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 struct EnumTypeValue {
@@ -288,19 +281,6 @@ mod tests {
             .unwrap_err(),
             NewEnumTypeError::EnumAliasPointsToNonExistantValue("bar", "zoo")
         ));
-    }
-
-    #[test]
-    fn test_has_default() {
-        let t = EnumType::new(Default::default(), Default::default(), None).unwrap();
-        assert!(!t.has_default());
-
-        let t = EnumType::builder()
-            .with_value("foo")
-            .with_default("foo")
-            .build()
-            .unwrap();
-        assert!(t.has_default());
     }
 
     #[test]
