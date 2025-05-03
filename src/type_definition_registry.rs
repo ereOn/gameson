@@ -335,7 +335,7 @@ fn detect_minimal_cycle<Id: Ord + Clone>(dependencies: &BTreeMap<Id, BTreeSet<Id
 mod tests {
     use crate::type_attributes::{ArrayTypeAttributes, EnumTypeAttributes};
 
-    use super::RegistrationError;
+    use super::{RegistrationError, detect_minimal_cycle};
 
     type Id = u32;
     type FieldName = &'static str;
@@ -589,5 +589,53 @@ mod tests {
             }
             _ => panic!("should have been a circular reference error"),
         }
+    }
+
+    #[test]
+    fn test_detect_minimal_cycle() {
+        let deps = [(1, [2]), (2, [3]), (3, [1])]
+            .into_iter()
+            .map(|(k, v)| (k, v.into_iter().collect()))
+            .collect();
+
+        let cycle = detect_minimal_cycle(&deps);
+        assert_eq!(cycle, vec![1, 2, 3, 1]);
+
+        let deps = [
+            (1, vec![2, 3]),
+            (2, vec![4, 5]),
+            (3, vec![6, 7]),
+            (4, vec![8]),
+            (5, vec![9]),
+            (6, vec![10]),
+            (7, vec![11]),
+            (8, vec![]),
+            (9, vec![]),
+            (10, vec![12]),
+            (11, vec![]),
+            (12, vec![3]),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k, v.into_iter().collect()))
+        .collect();
+
+        let cycle = detect_minimal_cycle(&deps);
+        assert_eq!(cycle, vec![3, 6, 10, 12, 3]);
+
+        let deps = [
+            (1, vec![2, 3]),
+            (2, vec![4, 5]),
+            (3, vec![6, 7]),
+            (4, vec![]),
+            (5, vec![]),
+            (6, vec![]),
+            (7, vec![]),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k, v.into_iter().collect()))
+        .collect();
+
+        let cycle = detect_minimal_cycle(&deps);
+        assert_eq!(cycle, Vec::<i32>::default());
     }
 }
