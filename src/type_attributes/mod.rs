@@ -1,8 +1,28 @@
+//! Type attributes.
+
+mod array;
+mod boolean;
+mod dictionary;
+mod r#enum;
+mod number;
+mod string;
+
+#[cfg(feature = "uuid")]
+mod uuid;
+
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{EnumType, NumberType};
+use array::ArrayTypeAttributes;
+use boolean::BooleanTypeAttributes;
+use dictionary::DictionaryTypeAttributes;
+use r#enum::EnumTypeAttributes;
+use number::NumberTypeAttributes;
+use string::StringTypeAttributes;
+
+#[cfg(feature = "uuid")]
+use uuid::UuidTypeAttributes;
 
 /// An generic enumeration of the different types of GameSON values.
 ///
@@ -14,74 +34,66 @@ use crate::{EnumType, NumberType};
 ///   or an integer, depending on the specific implementation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "type", content = "attributes")]
-pub enum Type<Id, EnumName: Ord + Display + Clone> {
+pub enum TypeAttributes<Id, FieldName: Ord + Display + Clone> {
     /// An array of values of the same type.
-    Array {
-        /// The items type identifier.
-        items_type_id: Id,
-    },
+    Array(ArrayTypeAttributes<Id>),
 
     /// A dictionary of key-value pairs.
     ///
     /// All the keys in a dictionary are of the same type, and all the values are of the same type.
-    Dictionary {
-        /// The keys type identifier.
-        keys_type_id: Id,
-
-        /// The values type identifier.
-        values_type_id: Id,
-    },
+    Dictionary(DictionaryTypeAttributes<Id>),
 
     /// A boolean value.
-    Boolean {},
+    Boolean(BooleanTypeAttributes),
 
     /// A 32-bit signed integer.
-    Int32(NumberType<i32>),
+    Int32(NumberTypeAttributes<i32>),
 
     /// A 64-bit signed integer.
-    Int64(NumberType<i64>),
+    Int64(NumberTypeAttributes<i64>),
 
     /// An unsigned 32-bit integer.
-    Uint32(NumberType<u32>),
+    Uint32(NumberTypeAttributes<u32>),
 
     /// An unsigned 64-bit integer.
-    Uint64(NumberType<u64>),
+    Uint64(NumberTypeAttributes<u64>),
 
     /// A 32-bit floating point number.
-    Float32(NumberType<f32>),
+    Float32(NumberTypeAttributes<f32>),
 
     /// A 64-bit floating point number.
-    Float64(NumberType<f64>),
+    Float64(NumberTypeAttributes<f64>),
 
     /// A string value.
-    String {},
+    String(StringTypeAttributes),
 
     /// An enumeration value.
     ///
     /// An enum is a type that can take on a limited set of values. The values are defined by the
     /// type itself.
-    Enum(EnumType<EnumName>),
+    Enum(EnumTypeAttributes<FieldName>),
 
     #[cfg(feature = "uuid")]
     /// An UUID value.
-    Uuid {
-        /// The default value of the UUID.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        default: Option<uuid::Uuid>,
-    },
+    Uuid(UuidTypeAttributes),
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
-    use crate::NumberType;
+    use crate::type_attributes::{
+        array::ArrayTypeAttributes, boolean::BooleanTypeAttributes,
+        dictionary::DictionaryTypeAttributes,
+    };
 
-    type Type = super::Type<u32, String>;
+    use super::NumberTypeAttributes;
+
+    type Type = super::TypeAttributes<u32, String>;
 
     #[test]
     fn test_serialization() {
-        let expected = Type::Array { items_type_id: 1 };
+        let expected = Type::Array(ArrayTypeAttributes::new(1));
 
         let json = serde_json::to_value(&expected).unwrap();
         assert_eq!(
@@ -97,10 +109,7 @@ mod tests {
         let t: Type = serde_json::from_value(json).unwrap();
         assert_eq!(t, expected);
 
-        let expected = Type::Dictionary {
-            keys_type_id: 1,
-            values_type_id: 2,
-        };
+        let expected = Type::Dictionary(DictionaryTypeAttributes::new(1, 2));
 
         let json = serde_json::to_value(&expected).unwrap();
         assert_eq!(
@@ -117,7 +126,7 @@ mod tests {
         let t: Type = serde_json::from_value(json).unwrap();
         assert_eq!(t, expected);
 
-        let expected = Type::Boolean {};
+        let expected = Type::Boolean(BooleanTypeAttributes::default());
 
         let json = serde_json::to_value(&expected).unwrap();
         assert_eq!(
@@ -131,7 +140,13 @@ mod tests {
         let t: Type = serde_json::from_value(json).unwrap();
         assert_eq!(t, expected);
 
-        let expected = Type::Int32(NumberType::builder().min(0).max(10).build().unwrap());
+        let expected = Type::Int32(
+            NumberTypeAttributes::builder()
+                .min(0)
+                .max(10)
+                .build()
+                .unwrap(),
+        );
 
         let json = serde_json::to_value(&expected).unwrap();
         assert_eq!(
@@ -147,7 +162,7 @@ mod tests {
 
         let t: Type = serde_json::from_value(json).unwrap();
         assert_eq!(t, expected);
-        let expected = Type::Float32(NumberType::default());
+        let expected = Type::Float32(NumberTypeAttributes::default());
 
         let json = serde_json::to_value(&expected).unwrap();
         assert_eq!(

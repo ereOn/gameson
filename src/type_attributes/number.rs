@@ -2,21 +2,21 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
-/// A number type.
+/// Attributes for a number type.
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub struct NumberType<Int> {
+pub struct NumberTypeAttributes<Int> {
     /// The minimum value of the number.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub min: Option<Int>,
+    min: Option<Int>,
 
     /// The maximum value of the number.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max: Option<Int>,
+    max: Option<Int>,
 }
 
 impl<'de, Int: Copy + Display + PartialOrd + Deserialize<'de>> Deserialize<'de>
-    for NumberType<Int>
+    for NumberTypeAttributes<Int>
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -33,22 +33,23 @@ impl<'de, Int: Copy + Display + PartialOrd + Deserialize<'de>> Deserialize<'de>
 
         let x = X::deserialize(deserializer)?;
 
-        NumberType::new(x.min, x.max).map_err(|err| serde::de::Error::custom(err.to_string()))
+        NumberTypeAttributes::new(x.min, x.max)
+            .map_err(|err| serde::de::Error::custom(err.to_string()))
     }
 }
 
-/// An error that can occur when instantiating an int type.
+/// An error that can occur when instantiating int type attributes.
 #[derive(Debug, thiserror::Error)]
-pub enum NewIntTypeError<Int> {
+pub enum NewIntTypeAttributesError<Int> {
     /// The range is invalid.
     #[error("invalid range: {0} > {1}")]
     InvalidRange(Int, Int),
 }
 
-impl<Int: PartialOrd + Copy> NumberType<Int> {
+impl<Int: PartialOrd + Copy> NumberTypeAttributes<Int> {
     /// Create a builder for the number type.
-    pub fn builder() -> NumberTypeBuilder<Int> {
-        NumberTypeBuilder::default()
+    pub fn builder() -> NumberTypeAttributesBuilder<Int> {
+        NumberTypeAttributesBuilder::default()
     }
 
     /// Creates a new number type.
@@ -57,10 +58,10 @@ impl<Int: PartialOrd + Copy> NumberType<Int> {
     ///
     /// This function will return an error if:
     /// - The range is invalid.
-    fn new(min: Option<Int>, max: Option<Int>) -> Result<Self, NewIntTypeError<Int>> {
+    fn new(min: Option<Int>, max: Option<Int>) -> Result<Self, NewIntTypeAttributesError<Int>> {
         if let (Some(min), Some(max)) = (min, max) {
             if min > max {
-                return Err(NewIntTypeError::InvalidRange(min, max));
+                return Err(NewIntTypeAttributesError::InvalidRange(min, max));
             }
         }
 
@@ -68,14 +69,14 @@ impl<Int: PartialOrd + Copy> NumberType<Int> {
     }
 }
 
-/// A builder for the number type.
+/// A builder for number type attributes.
 #[derive(Debug)]
-pub struct NumberTypeBuilder<Int> {
+pub struct NumberTypeAttributesBuilder<Int> {
     min: Option<Int>,
     max: Option<Int>,
 }
 
-impl<Int> Default for NumberTypeBuilder<Int> {
+impl<Int> Default for NumberTypeAttributesBuilder<Int> {
     fn default() -> Self {
         Self {
             min: None,
@@ -84,7 +85,7 @@ impl<Int> Default for NumberTypeBuilder<Int> {
     }
 }
 
-impl<Int: PartialOrd + Copy> NumberTypeBuilder<Int> {
+impl<Int: PartialOrd + Copy> NumberTypeAttributesBuilder<Int> {
     /// Sets the minimum value of the number.
     pub fn min(mut self, min: Int) -> Self {
         self.min = Some(min);
@@ -98,8 +99,8 @@ impl<Int: PartialOrd + Copy> NumberTypeBuilder<Int> {
     }
 
     /// Builds the number type.
-    pub fn build(self) -> Result<NumberType<Int>, NewIntTypeError<Int>> {
-        NumberType::new(self.min, self.max)
+    pub fn build(self) -> Result<NumberTypeAttributes<Int>, NewIntTypeAttributesError<Int>> {
+        NumberTypeAttributes::new(self.min, self.max)
     }
 }
 
@@ -107,7 +108,7 @@ impl<Int: PartialOrd + Copy> NumberTypeBuilder<Int> {
 mod tests {
     use serde_json::json;
 
-    type NumberType = super::NumberType<u32>;
+    type NumberType = super::NumberTypeAttributes<u32>;
 
     #[test]
     fn test_serialization() {

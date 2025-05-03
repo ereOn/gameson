@@ -1,11 +1,10 @@
 //! GameSON encoding format.
 
-mod enum_type;
-mod number_type;
-mod r#type;
-mod type_definition;
+pub(crate) mod type_attributes;
 
-pub use enum_type::EnumType;
-pub use number_type::NumberType;
-pub use r#type::Type;
+mod type_definition;
+mod typed_value;
+
+pub use type_attributes::TypeAttributes;
 pub use type_definition::TypeDefinition;
+pub use typed_value::TypedValue;

@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 
-/// An enumeration type definition.
+/// Attributes for an enum type.
 ///
 /// Enumeration types allow for a limited set of values, which are defined by the type itself.
 ///
@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 /// Empty enum types are allowed, although no value will satisfy their parsing requirements.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub struct EnumType<EnumName> {
+pub struct EnumTypeAttributes<EnumName> {
     /// The values of the enum.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     values: BTreeMap<EnumName, EnumTypeValue>,
@@ -37,7 +37,7 @@ pub struct EnumType<EnumName> {
     default: Option<EnumName>,
 }
 
-impl<EnumName> Default for EnumType<EnumName> {
+impl<EnumName> Default for EnumTypeAttributes<EnumName> {
     fn default() -> Self {
         Self {
             values: Default::default(),
@@ -47,16 +47,16 @@ impl<EnumName> Default for EnumType<EnumName> {
     }
 }
 
-impl<EnumName> EnumType<EnumName> {
+impl<EnumName> EnumTypeAttributes<EnumName> {
     /// Return a builder for the enum type.
-    pub fn builder() -> EnumTypeBuilder<EnumName> {
-        EnumTypeBuilder::default()
+    pub fn builder() -> EnumTypeAttributesBuilder<EnumName> {
+        EnumTypeAttributesBuilder::default()
     }
 }
 
-/// An error that can occur when instantiating an enum type.
+/// An error that can occur when instantiating enum type attributes.
 #[derive(Debug, thiserror::Error)]
-pub enum NewEnumTypeError<EnumName> {
+pub enum NewEnumTypeAttributesError<EnumName> {
     /// An enum value is also an alias.
     #[error("enum value `{0}` is also an alias")]
     EnumValueIsAlias(EnumName),
@@ -70,7 +70,7 @@ pub enum NewEnumTypeError<EnumName> {
     DefaultValueIsNotAValidEnumValue(EnumName),
 }
 
-impl<EnumName: Ord + Display + Clone> EnumType<EnumName> {
+impl<EnumName: Ord + Display + Clone> EnumTypeAttributes<EnumName> {
     /// Creates a new enum type.
     ///
     /// # Errors
@@ -83,25 +83,27 @@ impl<EnumName: Ord + Display + Clone> EnumType<EnumName> {
         values: BTreeMap<EnumName, EnumTypeValue>,
         aliases: BTreeMap<EnumName, EnumName>,
         default: Option<EnumName>,
-    ) -> Result<Self, NewEnumTypeError<EnumName>> {
+    ) -> Result<Self, NewEnumTypeAttributesError<EnumName>> {
         for (alias, value) in &aliases {
             if values.contains_key(alias) {
-                return Err(NewEnumTypeError::EnumValueIsAlias(alias.clone()));
+                return Err(NewEnumTypeAttributesError::EnumValueIsAlias(alias.clone()));
             }
 
             if !values.contains_key(value) {
-                return Err(NewEnumTypeError::EnumAliasPointsToNonExistantValue(
-                    alias.clone(),
-                    value.clone(),
-                ));
+                return Err(
+                    NewEnumTypeAttributesError::EnumAliasPointsToNonExistantValue(
+                        alias.clone(),
+                        value.clone(),
+                    ),
+                );
             }
         }
 
         if let Some(default) = &default {
             if !values.contains_key(default) {
-                return Err(NewEnumTypeError::DefaultValueIsNotAValidEnumValue(
-                    default.clone(),
-                ));
+                return Err(
+                    NewEnumTypeAttributesError::DefaultValueIsNotAValidEnumValue(default.clone()),
+                );
             }
         }
 
@@ -114,7 +116,7 @@ impl<EnumName: Ord + Display + Clone> EnumType<EnumName> {
 }
 
 impl<'de, EnumName: Ord + Display + Clone + Deserialize<'de>> Deserialize<'de>
-    for EnumType<EnumName>
+    for EnumTypeAttributes<EnumName>
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -149,9 +151,9 @@ struct EnumTypeValue {
     deprecated: bool,
 }
 
-/// A builder for the enum type.
+/// A builder for enum type attributes.
 #[derive(Debug)]
-pub struct EnumTypeBuilder<EnumName> {
+pub struct EnumTypeAttributesBuilder<EnumName> {
     /// The values of the enum.
     values: BTreeMap<EnumName, EnumTypeValue>,
 
@@ -162,7 +164,7 @@ pub struct EnumTypeBuilder<EnumName> {
     default: Option<EnumName>,
 }
 
-impl<EnumName> Default for EnumTypeBuilder<EnumName> {
+impl<EnumName> Default for EnumTypeAttributesBuilder<EnumName> {
     fn default() -> Self {
         Self {
             values: Default::default(),
@@ -172,7 +174,7 @@ impl<EnumName> Default for EnumTypeBuilder<EnumName> {
     }
 }
 
-impl<EnumName: Ord + Display + Clone> EnumTypeBuilder<EnumName> {
+impl<EnumName: Ord + Display + Clone> EnumTypeAttributesBuilder<EnumName> {
     /// Add a value to the enum type.
     pub fn with_value(mut self, name: EnumName) -> Self {
         self.values.insert(name, EnumTypeValue::default());
@@ -209,8 +211,10 @@ impl<EnumName: Ord + Display + Clone> EnumTypeBuilder<EnumName> {
     }
 
     /// Builds the enum type.
-    pub fn build(self) -> Result<EnumType<EnumName>, NewEnumTypeError<EnumName>> {
-        EnumType::new(self.values, self.aliases, self.default)
+    pub fn build(
+        self,
+    ) -> Result<EnumTypeAttributes<EnumName>, NewEnumTypeAttributesError<EnumName>> {
+        EnumTypeAttributes::new(self.values, self.aliases, self.default)
     }
 }
 
@@ -219,19 +223,20 @@ mod tests {
     use super::EnumTypeValue;
     use serde_json::json;
 
-    type EnumType = super::EnumType<&'static str>;
-    type NewEnumTypeError = super::NewEnumTypeError<&'static str>;
+    type EnumTypeAttributes = super::EnumTypeAttributes<&'static str>;
+    type NewEnumTypeAttributesError = super::NewEnumTypeAttributesError<&'static str>;
 
     #[test]
     fn test_validation() {
-        EnumType::new(Default::default(), Default::default(), None).unwrap();
+        EnumTypeAttributes::new(Default::default(), Default::default(), None).unwrap();
 
         assert!(matches!(
-            EnumType::new(Default::default(), Default::default(), Some("foo"),).unwrap_err(),
-            NewEnumTypeError::DefaultValueIsNotAValidEnumValue("foo")
+            EnumTypeAttributes::new(Default::default(), Default::default(), Some("foo"),)
+                .unwrap_err(),
+            NewEnumTypeAttributesError::DefaultValueIsNotAValidEnumValue("foo")
         ));
 
-        EnumType::new(
+        EnumTypeAttributes::new(
             [(
                 "foo",
                 EnumTypeValue {
@@ -247,7 +252,7 @@ mod tests {
         .unwrap();
 
         assert!(matches!(
-            EnumType::new(
+            EnumTypeAttributes::new(
                 [(
                     "foo",
                     EnumTypeValue {
@@ -261,11 +266,11 @@ mod tests {
                 None,
             )
             .unwrap_err(),
-            NewEnumTypeError::EnumValueIsAlias("foo")
+            NewEnumTypeAttributesError::EnumValueIsAlias("foo")
         ));
 
         assert!(matches!(
-            EnumType::new(
+            EnumTypeAttributes::new(
                 [(
                     "foo",
                     EnumTypeValue {
@@ -279,13 +284,13 @@ mod tests {
                 None,
             )
             .unwrap_err(),
-            NewEnumTypeError::EnumAliasPointsToNonExistantValue("bar", "zoo")
+            NewEnumTypeAttributesError::EnumAliasPointsToNonExistantValue("bar", "zoo")
         ));
     }
 
     #[test]
     fn test_serialization() {
-        type EnumType = super::EnumType<String>;
+        type EnumType = super::EnumTypeAttributes<String>;
 
         let expected = EnumType::new(
             [(
