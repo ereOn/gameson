@@ -116,6 +116,47 @@ impl<Num: PartialOrd + Copy> NumberTypeAttributesBuilder<Num> {
     }
 }
 
+/// An error that can occur when validating a number type.
+#[derive(Debug, thiserror::Error)]
+pub enum ValidateNumberTypeError<Num> {
+    /// The value is invalid.
+    #[error("invalid value")]
+    InvalidValue,
+
+    /// The value is less than the minimum.
+    #[error("value {0} is less than the minimum {1}")]
+    LessThanMin(Num, Num),
+
+    /// The value is greater than the maximum.
+    #[error("value {0} is greater than the maximum {1}")]
+    GreaterThanMax(Num, Num),
+}
+
+impl<Num: Ord + Copy> NumberTypeAttributes<Num> {
+    /// Validates a number type.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The value is less than the minimum.
+    /// - The value is greater than the maximum.
+    pub fn validate(&self, value: Num) -> Result<(), ValidateNumberTypeError<Num>> {
+        if let Some(min) = self.min {
+            if value < min {
+                return Err(ValidateNumberTypeError::LessThanMin(value, min));
+            }
+        }
+
+        if let Some(max) = self.max {
+            if value > max {
+                return Err(ValidateNumberTypeError::GreaterThanMax(value, max));
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;

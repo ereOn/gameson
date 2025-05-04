@@ -18,7 +18,7 @@ pub(crate) use array::ArrayTypeAttributes;
 pub(crate) use boolean::BooleanTypeAttributes;
 pub(crate) use dictionary::DictionaryTypeAttributes;
 pub(crate) use r#enum::EnumTypeAttributes;
-pub(crate) use number::NumberTypeAttributes;
+pub(crate) use number::{NumberTypeAttributes, ValidateNumberTypeError};
 pub(crate) use string::StringTypeAttributes;
 
 #[cfg(feature = "uuid")]
